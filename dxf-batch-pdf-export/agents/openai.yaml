@@ -1,0 +1,7 @@
+interface:
+  display_name: "DXF Batch PDF Export"
+  short_description: "Export DXF frames to verified AutoCAD PDFs."
+  default_prompt: "Use $dxf-batch-pdf-export to preflight DXF drawings, export frame windows to one-page PDFs with AutoCAD, and verify the result."
+
+policy:
+  allow_implicit_invocation: true

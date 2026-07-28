@@ -1,0 +1,13 @@
+﻿__pycache__/
+*.pyc
+*.pyo
+*.pdf
+*.dxf
+*.dwg
+*.codexplot
+*_work_*/
+pages/
+render_samples/
+*.log
+.DS_Store
+Thumbs.db
