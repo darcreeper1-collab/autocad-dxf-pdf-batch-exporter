@@ -1,80 +1,104 @@
-﻿# AutoCAD DXF PDF Batch Exporter
+# AutoCAD DXF PDF Batch Exporter
 
-A Codex skill for high-fidelity batch export of model-space DXF/DWG drawing frames to one-page-per-drawing PDFs on Windows. It keeps AutoCAD as the final plotting engine and uses DXF parsing only for preflight diagnostics and page-window detection.
+A Codex skill for high-fidelity, one-drawing-per-page PDF export from model-space DXF and DWG files on Windows. AutoCAD performs the final plot, preserving native colors, SHX/TTF fonts, line types, text positioning, dimensions, and block display better than lightweight DXF renderers.
 
-中文简介：这是一个面向化工设计图、PFD、P&ID、厂区布置图等 CAD 图纸的 Codex skill。它通过 AutoCAD 原生 `PlotToFile` 批量输出 PDF，尽量保留颜色、SHX/TTF 字体、线型、文字位置和块显示效果，同时支持图框自动识别、WPS 弹窗规避和 PDF 抽样校验。
+中文简介：本项目通过 AutoCAD 原生 `PlotToFile` 批量输出 PDF。它对图框进行预检、识别和排序，并在输出后校验页数、页面尺寸、颜色、居中与铺满程度。源 DXF/DWG 始终保持不变。
 
-## Why AutoCAD-based plotting
+## What it does
 
-Lightweight DXF renderers are useful for quick previews, but they can lose fidelity in SHX fonts, text placement, linetypes, plot settings, dimensions, and block visibility. This skill therefore uses AutoCAD COM automation for final PDF output and treats DXF parsing as a diagnostic and window-detection layer.
-
-## Features
-
-- Batch export one drawing frame per PDF page.
-- Preserve AutoCAD-native plotting fidelity through `DWG To PDF.pc3`.
-- Detect model-space page windows using three strategies:
-  - repeated inserted frame blocks,
-  - colored frame geometry,
-  - entity-cluster fallback windows.
-- Generate DXF preflight reports for encoding, text escape codes, style fonts, dimensions, layers, colors, and frame candidates.
-- Avoid repeated WPS/default PDF viewer popups by plotting to `.codexplot` first and renaming to `.pdf` afterward.
-- Merge split page PDFs into a combined PDF.
-- Verify page count, page size, rendered sample non-blankness, color pixels, and content margins.
+- Plots one model-space drawing frame per PDF page with `DWG To PDF.pc3`.
+- Detects frames in this order: repeated frame blocks, colored geometry, standard-size geometry on layers containing `图框`, then entity clusters.
+- Stops a suspicious one-window cluster result when multiple standard frame-layer sheets exist, unless explicitly overridden.
+- Reads complete title-block text such as `第3张 共8张` and uses it for output order only when all frames form a consistent `1..N / N` sequence.
+- Uses a `.codexplot` temporary extension before renaming output to PDF, reducing WPS/default-viewer popups without terminating unrelated applications.
+- Makes a temporary AutoCAD-exported DXF mirror for DWG preflight and frame detection; it plots the original DWG for final fidelity.
+- Records `input_route.json`, `preflight_report.json`, `frames.json`, `plot_results.json`, and verification reports in the work directory.
 
 ## Requirements
 
-- Windows.
-- AutoCAD installed and accessible through COM automation.
-- AutoCAD PDF plotter, normally `DWG To PDF.pc3`.
-- PowerShell.
-- Python 3.10+ recommended.
+- Windows, PowerShell, Python 3.10+.
+- AutoCAD installed with COM automation and `DWG To PDF.pc3`.
 - Python packages in `requirements.txt`.
-- Poppler `pdftoppm.exe` for rendered PDF sample verification.
+- Poppler `pdftoppm.exe` for rendered-page quality checks.
 
-External components such as AutoCAD, Autodesk files, plotter configuration files, fonts, and Poppler are not bundled in this repository.
+Run the supplied PowerShell scripts with a process-local execution-policy override:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\dxf-batch-pdf-export\scripts\convert_dxf_to_pdf_set.ps1 ...
+```
+
+`-ExecutionPolicy Bypass` applies only to that command process. It does not change the computer-wide or user-wide PowerShell policy.
 
 ## Installation as a Codex skill
-
-Copy the `dxf-batch-pdf-export` folder into your Codex skills directory, for example:
 
 ```powershell
 Copy-Item -Recurse .\dxf-batch-pdf-export "$env:USERPROFILE\.codex\skills\dxf-batch-pdf-export"
 ```
 
-Restart or refresh Codex so the skill is discovered.
+Restart or refresh Codex after copying.
 
-## Typical use
+## Typical DXF use
 
-Ask Codex to use the skill, for example:
-
-```text
-Use dxf-batch-pdf-export to export C:\drawings\process-flow.dxf to a one-page-per-frame PDF set. Use A1 landscape, preserve color, and verify first/middle/last pages.
-```
-
-The one-command controller is available at:
+Start with one page, inspect it, then run the complete set:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\dxf-batch-pdf-export\scripts\convert_dxf_to_pdf_set.ps1 `
   -InputDxf 'C:\drawings\process-flow.dxf' `
   -OutputPdf 'C:\drawings\process-flow.pdf' `
   -PythonExe 'python' `
-  -FrameWidth 841 `
-  -FrameHeight 594 `
+  -FrameWidth 841 -FrameHeight 594 `
   -DetectionStrategy auto `
-  -RenderSamples 1
+  -MaxPages 1 -RenderSamples 1
 ```
+
+After the sample passes visual review, remove `-MaxPages 1` and rerun to a new output/work directory.
+
+## Complete DWG to multi-frame A1 PDF example
+
+The source DWG is not changed. A temporary `input_mirror\<name>_diagnostic.dxf` is created under `WorkDir` for preflight and detection, while the original DWG is passed to AutoCAD for plotting.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\dxf-batch-pdf-export\scripts\convert_dxf_to_pdf_set.ps1 `
+  -InputDxf 'D:\CAD\unit-layout.dwg' `
+  -OutputPdf 'D:\CAD\out\unit-layout-A1.pdf' `
+  -WorkDir 'D:\CAD\out\unit-layout-A1_work' `
+  -PythonExe 'python' `
+  -FrameWidth 841 -FrameHeight 594 -FrameTolerance 5 `
+  -DetectionStrategy auto `
+  -FrameLayerToken '图框' `
+  -Sort top-left `
+  -RenderSamples 1 -MaxMarginFraction 0.05
+```
+
+Inspect `input_route.json` and `frames.json`. If all title blocks contain a consistent form such as `第x张 共8张`, `frames.json.pageOrder.method` becomes `title-block-page-number` and the merged PDF follows that sequence.
+
+## AutoCAD instance and COM policy
+
+The default is safe isolation: the workflow creates a new hidden AutoCAD instance, waits for `AcadState.IsQuiescent` when available, retries only temporary COM-busy errors such as `RPC_E_CALL_REJECTED`, and closes that owned instance in `finally`.
+
+Reuse is opt-in:
+
+```powershell
+-ReuseExistingAutoCAD 1 -AutoCadProgId 'AutoCAD.Application.24'
+```
+
+When reuse is selected, the workflow does not hide, quit, or alter the existing application instance; it only opens and later closes its own conversion document. Modal dialogs, license prompts, unsaved-document prompts, and long-running commands in that user session can still block automation.
+
+`-AutoCadProgId` is optional. When omitted, the scripts inspect registered `AutoCAD.Application.*` ProgIDs and choose the highest discovered version. The actual selected ProgID and reported AutoCAD version are recorded in `plot_results.json`.
 
 ## Safety model
 
-The default workflow does not modify the source DXF/DWG. It writes intermediate JSON reports, split PDFs, rendered samples, and merged PDFs into the chosen work/output directories. Text or dimension repair should be done only on a copied DXF after explicit user approval.
+- Never modify the source DXF or DWG.
+- Do not kill WPS, PDF viewers, or unrelated AutoCAD processes.
+- Do not silently export a model-space-wide cluster when multiple standard sheets are detectable on `图框` layers.
+- Use a small AutoCAD sample before a full export, especially for custom fonts, rotated frames, proxy objects, or a new printer/media configuration.
 
 ## Limitations
 
-- The robust path is DXF-first. DWG files can be plotted by AutoCAD, but text-based preflight and frame detection currently expect DXF input.
-- Rotated or deeply nested frames may need manual checking or a custom detection strategy.
-- Entity-cluster detection is a fallback proposal, not a guaranteed drawing-sheet detector.
-- Missing SHX/TTF fonts can still cause AutoCAD font substitution.
-- AutoCAD COM automation is GUI-adjacent and may require closing modal dialogs or license prompts.
+- The diagnostic DXF mirror of a DWG is produced by AutoCAD and is non-destructive, but proxy/custom objects can still need visual checking. Final plotting remains on the original DWG.
+- AutoCAD modal dialogs cannot be dismissed safely by the skill; clear them manually and rerun.
+- Rotated or deeply nested frames may require a manual frame strategy or sample review.
+- A partially missing/ambiguous title-block sequence falls back to geometric ordering and records a warning.
 
 ## Repository layout
 
@@ -84,6 +108,7 @@ dxf-batch-pdf-export/
   agents/openai.yaml
   scripts/
   references/
+  tests/
 ```
 
 ## License
