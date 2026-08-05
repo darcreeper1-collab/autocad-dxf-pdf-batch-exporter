@@ -1,4 +1,4 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
 *.pyo
 *.pdf
@@ -11,3 +11,4 @@ render_samples/
 *.log
 .DS_Store
 Thumbs.db
+.test-output/
