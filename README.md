@@ -14,6 +14,16 @@ A Codex skill for high-fidelity, one-drawing-per-page PDF export from model-spac
 - Makes a temporary AutoCAD-exported DXF mirror for DWG preflight and frame detection; it plots the original DWG for final fidelity.
 - Records `input_route.json`, `preflight_report.json`, `frames.json`, `plot_results.json`, and verification reports in the work directory.
 
+## Regression tests
+
+Issue #2 fix: successful DWG mirror conversion no longer fails because of a null or stale native exit code. The regression suite runs the actual controller with mocked AutoCAD boundaries and real DXF preflight/detection; it does not validate real AutoCAD plotting.
+
+Run the tests on Windows with Python available:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run_simulated_tests.ps1 -PythonExe python
+```
+
 ## Requirements
 
 - Windows, PowerShell, Python 3.10+.

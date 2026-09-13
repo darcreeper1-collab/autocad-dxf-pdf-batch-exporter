@@ -33,6 +33,10 @@ Leave `-ReuseExistingAutoCAD` at its default `0`. The workflow starts and later 
 
 ## DWG input has no preflight report or no frames
 
+If an older controller reports `DWG to diagnostic DXF mirror conversion failed with exit code ` even though the mirror was created, update the skill. Issue #2 removed an invalid `$LASTEXITCODE` check after an in-process PowerShell script call. The controller now propagates script errors and validates the conversion JSON status and mirror path. Native Python exit-code checks remain active.
+
+COM retry deadlines limit busy retries, not the duration of an individual blocking COM call. This fix does not add a watchdog for a hung AutoCAD call.
+
 DWG detection is DXF-based. The controller creates `input_mirror\*_diagnostic.dxf` under `WorkDir`, records the relationship in `input_route.json`, preflights that mirror, and plots the original DWG. The DWG is never modified.
 
 If AutoCAD saves a non-text DXF mirror, rerun with `-DxfSaveAsFormat` set to a DXF `AcSaveAsType` supported by the installed AutoCAD release. Verify the mirror with `analyze_dxf_features.py` before plotting.

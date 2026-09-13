@@ -99,8 +99,11 @@ if ($route.requiresDxfMirror) {
         -AutoCadProgId $AutoCadProgId -ReuseExistingAutoCAD $ReuseExistingAutoCAD `
         -ComTimeoutSeconds $ComTimeoutSeconds -ComInitialDelayMilliseconds $ComInitialDelayMilliseconds `
         -ComMaxDelayMilliseconds $ComMaxDelayMilliseconds -DxfSaveAsFormat $DxfSaveAsFormat
-    if ($LASTEXITCODE -ne 0) { throw "DWG to diagnostic DXF mirror conversion failed with exit code $LASTEXITCODE" }
+    # In-process scripts propagate errors under Stop; native exit codes can be stale.
     $conversionSummary = $conversionOutput | ConvertFrom-Json
+    if ($null -eq $conversionSummary -or $conversionSummary.status -ne "ok") {
+        throw "DWG mirror script did not report a successful conversion."
+    }
     if (-not (Test-Path -LiteralPath $route.workingDxfCopy)) { throw "DWG mirror script reported success but no DXF mirror exists: $($route.workingDxfCopy)" }
 }
 
