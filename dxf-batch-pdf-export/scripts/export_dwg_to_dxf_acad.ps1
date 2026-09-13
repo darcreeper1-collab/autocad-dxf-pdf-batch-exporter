@@ -11,6 +11,9 @@ param(
     [string]$AutoCadProgId = "",
     [int]$ReuseExistingAutoCAD = 0,
     [int]$ComTimeoutSeconds = 120,
+    [ValidateRange(1, 86400)][int]$ComCallTimeoutSeconds = 300,
+    [switch]$WorkerMode,
+    [string]$WorkerStatePath = '',
     [int]$ComInitialDelayMilliseconds = 250,
     [int]$ComMaxDelayMilliseconds = 3000,
     [int]$DxfSaveAsFormat = -1
@@ -19,6 +22,11 @@ param(
 $ErrorActionPreference = "Stop"
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptRoot "acad_com_helpers.ps1")
+if (-not $WorkerMode) {
+    Invoke-AcadSupervisedScript -ScriptPath $PSCommandPath -Parameters $PSBoundParameters -LogRoot (Split-Path -Parent ([IO.Path]::GetFullPath($OutputDxf))) -TimeoutSeconds $ComCallTimeoutSeconds
+    return
+}
+$script:AcadWorkerStatePath = $WorkerStatePath
 $events = New-Object System.Collections.Generic.List[object]
 Set-AcadComLogSink -Sink $events
 
@@ -50,6 +58,8 @@ try {
         $acad = Invoke-ConversionCom -Operation "Create AutoCAD instance $resolvedProgId" -SkipIdleWait -Action { New-Object -ComObject $resolvedProgId }
         $created = $true
         Add-AcadComEvent -Operation "AutoCAD instance" -Event "created-owned" -Message $resolvedProgId
+        $ownedHandle = Invoke-ConversionCom -Operation 'Identify owned AutoCAD window' -Acad $acad -Action { $acad.HWND }
+        Register-OwnedAcadWindow -Handle $ownedHandle
         [void](Invoke-ConversionCom -Operation "Hide owned AutoCAD instance" -Acad $acad -Action { $acad.Visible = $false })
         [void](Invoke-ConversionCom -Operation "Disable alerts on owned AutoCAD instance" -Acad $acad -Action { $acad.DisplayAlerts = $false })
     }
@@ -84,7 +94,7 @@ try {
     sourceDwg = $source
     diagnosticDxf = $output
     sourceModified = $false
-    autoCad = [ordered]@{ requestedProgId = $AutoCadProgId; resolvedProgId = $resolvedProgId; reportedVersion = $reportedVersion; reuseExistingExplicitly = [bool]$ReuseExistingAutoCAD; instanceOwnership = $(if ($created) { "created-and-closed-by-workflow" } else { "reused-user-instance" }) }
+    autoCad = [ordered]@{ requestedProgId = $AutoCadProgId; resolvedProgId = $resolvedProgId; reportedVersion = $reportedVersion; reuseExistingExplicitly = [bool]$ReuseExistingAutoCAD; instanceOwnership = $(if ($created) { "created-owned" } else { "reused-user-instance" }); cleanupFailed = [bool](@($events | Where-Object { $_.event -eq 'cleanup-failed' }).Count) }
     comEvents = @($events)
     status = "ok"
 } | ConvertTo-Json -Depth 10

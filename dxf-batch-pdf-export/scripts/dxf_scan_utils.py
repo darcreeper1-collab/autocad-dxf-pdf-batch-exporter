@@ -157,7 +157,28 @@ def parse_sections(path: Path):
                 else:
                     cur_data.append((code, value))
 
+    entities = collect_polyline_vertices(entities)
+    blocks = {name: collect_polyline_vertices(records) for name, records in blocks.items()}
     return entities, blocks, tables, encoding
+
+
+def collect_polyline_vertices(records):
+    """Attach classic POLYLINE's VERTEX stream; its header point is not geometry."""
+    result = []
+    active = None
+    for kind, data in records:
+        if kind == "VERTEX" and active is not None:
+            active.extend((code, value) for code, value in data if code in {"10", "20"})
+            continue
+        if kind == "SEQEND" and active is not None:
+            active = None
+            continue
+        active = None
+        if kind == "POLYLINE":
+            data = [(code, value) for code, value in data if code not in {"10", "20"}]
+            active = data
+        result.append((kind, data))
+    return result
 
 
 def first(entity: list[tuple[str, str]], code: str, default: str = "") -> str:
@@ -327,7 +348,7 @@ def entity_bbox(
 
 
 def get_text_value(entity: list[tuple[str, str]]) -> str:
-    parts = values_for_code(entity, "1") + values_for_code(entity, "3")
+    parts = values_for_code(entity, "3") + values_for_code(entity, "1")
     return "".join(parts)
 
 

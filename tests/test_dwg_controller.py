@@ -48,7 +48,7 @@ $config = Get-Content -LiteralPath $WindowsJson -Raw -Encoding UTF8 | ConvertFro
     wrapper.write_text(f'''$ErrorActionPreference = 'Stop'
 {prior}
 try {{
-    $output = & {ps_quote(scripts / 'convert_dxf_to_pdf_set.ps1')} -InputDxf {ps_quote(source)} -WorkDir {ps_quote(work)} -OutputPdf {ps_quote(case / 'output.pdf')} -PythonExe {ps_quote(sys.executable)} -FrameLayerToken 'unused' -FrameColor 6 -SkipMerge 1 -SkipVerification 1
+    $output = & {ps_quote(scripts / 'convert_dxf_to_pdf_set.ps1')} -InputDxf {ps_quote(source)} -WorkDir {ps_quote(work)} -OutputPdf {ps_quote(case / 'output.pdf')} -PythonExe {ps_quote(sys.executable)} -FrameColor 6 -SkipMerge 1 -SkipVerification 1
     $output | Set-Content -LiteralPath {ps_quote(result)} -Encoding UTF8
     exit 0
 }} catch {{
@@ -57,9 +57,7 @@ try {{
     exit 1
 }}
 ''', encoding="utf-8")
-    # Use explicit frame-layer filtering for the fixture across PS 5.1 encodings.
-    fixture_text = fixture.read_text(encoding="utf-8").replace("\u56fe\u6846-A1", "unused-A1")
-    fixture.write_text(fixture_text, encoding="utf-8")
+    # Exercise the actual Chinese default layer token in Windows PowerShell 5.1.
     completed = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
                                 "-File", str(wrapper)], capture_output=True, timeout=60)
     assert source.read_bytes() == b"synthetic source: must remain unchanged"

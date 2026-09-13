@@ -35,7 +35,7 @@ Leave `-ReuseExistingAutoCAD` at its default `0`. The workflow starts and later 
 
 If an older controller reports `DWG to diagnostic DXF mirror conversion failed with exit code ` even though the mirror was created, update the skill. Issue #2 removed an invalid `$LASTEXITCODE` check after an in-process PowerShell script call. The controller now propagates script errors and validates the conversion JSON status and mirror path. Native Python exit-code checks remain active.
 
-COM retry deadlines limit busy retries, not the duration of an individual blocking COM call. This fix does not add a watchdog for a hung AutoCAD call.
+The controller and standalone AutoCAD scripts now add a process watchdog; see the blocking-call recovery section below. Busy-retry deadlines alone still cannot interrupt a synchronous COM call.
 
 DWG detection is DXF-based. The controller creates `input_mirror\*_diagnostic.dxf` under `WorkDir`, records the relationship in `input_route.json`, preflights that mirror, and plots the original DWG. The DWG is never modified.
 
@@ -47,17 +47,20 @@ If AutoCAD saves a non-text DXF mirror, rerun with `-DxfSaveAsFormat` set to a D
 - Set `-FrameLayerToken '图框'` (or the project's equivalent) to identify repeated standard-size A1 geometry on frame layers.
 - Use `-DetectionStrategy layer` to inspect those candidates directly.
 - Check `frames.json.diagnostics.candidateFrameCounts`, `layerCandidates`, and `conflicts`.
-- A single `cluster` window that covers several detected standard frame-layer sheets is blocked by default. Do not bypass it with `-AllowSuspiciousCluster 1` until a sample plot has been reviewed.
+- Any single fallback `cluster` is blocked by default, including drawings on unknown layers and genuine single-sheet clusters without independent frame evidence. Use `-FrameLayer 'FRAME,BORDER,TK'` or the actual layer. Only use `-AllowSuspiciousCluster 1` after manual confirmation.
 - Rotated frame INSERTs still need manual checking because AutoCAD window plots are axis-aligned.
 
 ## Page order is wrong
 
 `frames.json.pageOrder.method` is `title-block-page-number` only when every detected frame contains a single consistent sequence matching `第1张 共N张` through `第N张 共N张`. Otherwise the workflow uses the requested geometric sort and adds a warning. Inspect each frame's `pageNumberEvidence`; correct title-block text or set `-Sort` deliberately.
 
+Comma/Chinese comma, slash/full-width slash, semicolon, whitespace, and MTEXT paragraph separators between `张` and `共` are supported. Multiple conflicting annotations in one text entity also prevent reordering. Nested block text still requires manual checking.
+
 ## Output is not centered, lacks color, or does not fill the page
 
 - Verify each `window` in `frames.json` and reduce/increase `-Padding` only after a sample.
 - Confirm the selected device/media in `plot_results.json.pages`.
+- Required device/media, window, scale, centering, rotation, and color/lineweight properties now fail on assignment or readback mismatch. Use an exact canonical media name available in your AutoCAD plotter; do not downgrade the error to a warning. Critical setup failures can occur before `plot_results.json`; inspect worker `stderr.log`.
 - Keep `DWG To PDF.pc3`, ensure the A1 media matches the detected orientation, and inspect rendered samples plus `contentMarginFractions`.
 - Missing SHX/TTF files remain an AutoCAD environment issue; AutoCAD can substitute fonts even though the skill uses native plotting.
 
@@ -68,3 +71,15 @@ Keep `-IntermediateExtension .codexplot`. The script renames completed files to 
 ## Verification cannot render samples
 
 Install Poppler or provide `--pdftoppm`. `pypdf` can still check pages and media boxes, but rendered images are necessary for claims about centering, blank pages, and color.
+
+Lookup priority is explicit executable, PATH, then fixed known locations beneath at most three Python parent directories. An invalid explicit file fails immediately. No recursive disk scan occurs. `--pdftoppm` belongs to `verify_pdf_pages.py`; put Poppler on PATH when using the controller. Image statistics use Pillow masks with the original thresholds: minimum RGB below 245 is nonwhite; channel difference above 10 is colored.
+
+## Hidden AutoCAD stops responding or a COM call never returns
+
+1. The supervisor waits at most `-ComCallTimeoutSeconds` (default 300) without a new COM operation. This is separate from `-ComTimeoutSeconds` (busy retries, default 120). Increase the former only for a known long operation; a healthy multi-page batch is not limited to 300 seconds overall.
+2. On timeout only the owned PowerShell worker is stopped. AutoCAD is never killed. Its identified owned window is requested visible using native window APIs, after matching HWND/PID/process start time. Reused sessions are never hidden or restored by the supervisor.
+3. Read `.acad-worker/<run-id>/operation.txt`, `operation.txt.events.jsonl` (when events exist), `stderr.log`, and `timeout.txt`. For plotting this directory is under the page output directory; for DWG conversion it is under the diagnostic mirror directory. These logs contain local paths: review before sharing publicly.
+4. Clear the license, missing-reference, printer, or other modal dialog manually. If automation hung during COM activation before a window was identified, no safe recovery window is known; inspect AutoCAD on the desktop/Task Manager manually. Do not kill unrelated processes or rerun repeatedly while residual instances remain.
+5. Confirm the source drawing remains unchanged, use a new work directory, and rerun one sample. A forcibly stopped worker cannot guarantee `finally` cleanup. Normal cleanup failures are recorded as `autoCad.cleanupFailed`; a residual owned window is also requested visible after worker exit.
+
+Offline tests verify worker success, error propagation, a genuinely sleeping/hung subprocess timeout, and progress across a longer batch. Real AutoCAD modal-dialog exposure, COM activation, media names, final SHX fidelity, and cleanup still require installed-AutoCAD acceptance testing.

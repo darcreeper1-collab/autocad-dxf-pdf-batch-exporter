@@ -8,6 +8,7 @@ themselves.
 #>
 
 $script:AcadComLogSink = $null
+. (Join-Path $PSScriptRoot 'acad_worker.ps1')
 
 function Set-AcadComLogSink {
     param([object]$Sink)
@@ -30,6 +31,9 @@ function Add-AcadComEvent {
     }
     if ($null -ne $script:AcadComLogSink) {
         try { [void]$script:AcadComLogSink.Add([pscustomobject]$record) } catch {}
+    }
+    if ($script:AcadWorkerStatePath) {
+        [IO.File]::AppendAllText(($script:AcadWorkerStatePath + '.events.jsonl'), (($record | ConvertTo-Json -Compress) + [Environment]::NewLine), [Text.Encoding]::UTF8)
     }
     Write-Verbose ("AutoCAD COM [{0}] {1} attempt={2}: {3}" -f $Event, $Operation, $Attempt, $Message)
 }
@@ -170,6 +174,7 @@ function Invoke-AcadComRetry {
         [switch]$SkipIdleWait
     )
 
+    Write-AcadWorkerProgress -Operation $Operation
     $timeout = [Math]::Max(1, $TimeoutSeconds)
     $deadline = (Get-Date).AddSeconds($timeout)
     $delay = [Math]::Max(25, $InitialDelayMilliseconds)
@@ -245,5 +250,13 @@ function Release-AcadComObject {
                 [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($ComObject)
             }
         } catch {}
+    }
+}
+
+function Assert-AcadProperty {
+    param([object]$Object, [string]$Name, [object]$Expected)
+    $actual = $Object.$Name
+    if ($null -eq $actual -or $actual -ne $Expected) {
+        throw "Required plot property $Name mismatch: expected '$Expected', got '$actual'. Refusing to plot."
     }
 }

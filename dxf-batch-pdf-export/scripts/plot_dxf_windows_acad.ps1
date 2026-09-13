@@ -21,6 +21,9 @@ param(
     [string]$AutoCadProgId = "",
     [int]$ReuseExistingAutoCAD = 0,
     [int]$ComTimeoutSeconds = 120,
+    [ValidateRange(1, 86400)][int]$ComCallTimeoutSeconds = 300,
+    [switch]$WorkerMode,
+    [string]$WorkerStatePath = '',
     [int]$ComInitialDelayMilliseconds = 250,
     [int]$ComMaxDelayMilliseconds = 3000,
 
@@ -36,6 +39,11 @@ param(
 $ErrorActionPreference = "Stop"
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptRoot "acad_com_helpers.ps1")
+if (-not $WorkerMode) {
+    Invoke-AcadSupervisedScript -ScriptPath $PSCommandPath -Parameters $PSBoundParameters -LogRoot $OutputDir -TimeoutSeconds $ComCallTimeoutSeconds
+    return
+}
+$script:AcadWorkerStatePath = $WorkerStatePath
 
 $comEvents = New-Object System.Collections.Generic.List[object]
 $layoutWarnings = New-Object System.Collections.Generic.List[string]
@@ -69,10 +77,15 @@ function Set-SysVarSafe {
 
 function Set-PropSafe {
     param([object]$Object, [string]$Name, [object]$Value, [object]$Acad)
+    $required = $Name -in @('ConfigName', 'CanonicalMediaName', 'PaperUnits', 'PlotType', 'CenterPlot', 'UseStandardScale', 'StandardScale', 'PlotRotation', 'PlotWithPlotStyles', 'PlotWithLineweights', 'ScaleLineweights', 'PlotHidden')
     try {
         [void](Invoke-PlotCom -Operation "Set property $Name" -Acad $Acad -Action { $Object.$Name = $Value })
+        if ($required) {
+            [void](Invoke-PlotCom -Operation "Verify property $Name" -Acad $Acad -Action { Assert-AcadProperty -Object $Object -Name $Name -Expected $Value })
+        }
         return $true
     } catch {
+        if ($required) { throw "Required plot setting ${Name} failed: $($_.Exception.Message)" }
         $layoutWarnings.Add("Could not set ${Name}: $($_.Exception.Message)")
         return $false
     }
@@ -178,6 +191,8 @@ try {
         }
         $createdAcad = $true
         Add-AcadComEvent -Operation "AutoCAD instance" -Event "created-owned" -Message $resolvedProgId
+        $ownedHandle = Invoke-PlotCom -Operation 'Identify owned AutoCAD window' -Acad $acad -Action { $acad.HWND }
+        Register-OwnedAcadWindow -Handle $ownedHandle
         [void](Invoke-PlotCom -Operation "Hide owned AutoCAD instance" -Acad $acad -Action { $acad.Visible = $false })
         [void](Invoke-PlotCom -Operation "Disable alerts on owned AutoCAD instance" -Acad $acad -Action { $acad.DisplayAlerts = $false })
     }
@@ -203,10 +218,9 @@ try {
     [void](Invoke-PlotCom -Operation "Activate Model layout" -Acad $acad -Action { $doc.ActiveLayout = $layout })
     try { [void](Invoke-PlotCom -Operation "Set model space" -Acad $acad -Action { $doc.ActiveSpace = 1 }) } catch { $layoutWarnings.Add("Could not activate model space: $($_.Exception.Message)") }
     [void](Set-PropSafe -Object $layout -Name "ConfigName" -Value $DeviceName -Acad $acad)
-    try { [void](Invoke-PlotCom -Operation "Refresh plot device info" -Acad $acad -Action { $layout.RefreshPlotDeviceInfo() }) } catch { $layoutWarnings.Add("Could not refresh plot device: $($_.Exception.Message)") }
+    [void](Invoke-PlotCom -Operation "Refresh plot device info" -Acad $acad -Action { $layout.RefreshPlotDeviceInfo() })
     [void](Set-PropSafe -Object $layout -Name "PaperUnits" -Value 1 -Acad $acad)
     [void](Set-PropSafe -Object $layout -Name "CanonicalMediaName" -Value $MediaName -Acad $acad)
-    [void](Set-PropSafe -Object $layout -Name "PlotType" -Value 4 -Acad $acad)
     [void](Set-PropSafe -Object $layout -Name "CenterPlot" -Value $true -Acad $acad)
     [void](Set-PropSafe -Object $layout -Name "UseStandardScale" -Value $true -Acad $acad)
     [void](Set-PropSafe -Object $layout -Name "StandardScale" -Value 0 -Acad $acad)
@@ -241,6 +255,10 @@ try {
             $item.actualDevice = [string](Invoke-PlotCom -Operation "Read plot device page $page" -Acad $acad -Action { $layout.ConfigName })
             $item.actualMedia = [string](Invoke-PlotCom -Operation "Read plot media page $page" -Acad $acad -Action { $layout.CanonicalMediaName })
             $item.actualRotation = Invoke-PlotCom -Operation "Read plot rotation page $page" -Acad $acad -Action { $layout.PlotRotation }
+            [void](Invoke-PlotCom -Operation "Verify critical settings page $page" -Acad $acad -Action {
+                $expected = @{ ConfigName = $DeviceName; CanonicalMediaName = $MediaName; PaperUnits = 1; PlotType = 4; CenterPlot = $true; UseStandardScale = $true; StandardScale = 0; PlotRotation = $PlotRotation; PlotWithPlotStyles = $false; PlotWithLineweights = $true; ScaleLineweights = $false; PlotHidden = $false }
+                foreach ($name in $expected.Keys) { Assert-AcadProperty -Object $layout -Name $name -Expected $expected[$name] }
+            })
             try { [void](Invoke-PlotCom -Operation "Regen page $page" -Acad $acad -Action { $doc.Regen(1) }) } catch { $layoutWarnings.Add("Regen failed on page ${page}: $($_.Exception.Message)") }
             $ok = Invoke-PlotCom -Operation "PlotToFile page $page" -Acad $acad -Action { $plot.PlotToFile($plotPath) }
             if (-not $ok) { throw "AutoCAD PlotToFile returned false" }
@@ -281,7 +299,7 @@ try {
 [ordered]@{
     schemaVersion = 2
     input = $resolvedInput
-    autoCad = [ordered]@{ requestedProgId = $AutoCadProgId; resolvedProgId = $resolvedProgId; reportedVersion = $reportedVersion; reuseExistingExplicitly = [bool]$ReuseExistingAutoCAD; instanceOwnership = $(if ($createdAcad) { "created-and-closed-by-workflow" } else { "reused-user-instance" }) }
+    autoCad = [ordered]@{ requestedProgId = $AutoCadProgId; resolvedProgId = $resolvedProgId; reportedVersion = $reportedVersion; reuseExistingExplicitly = [bool]$ReuseExistingAutoCAD; instanceOwnership = $(if ($createdAcad) { "created-owned" } else { "reused-user-instance" }); cleanupFailed = [bool](@($comEvents | Where-Object { $_.event -eq 'cleanup-failed' }).Count) }
     layoutWarnings = @($layoutWarnings)
     comEvents = @($comEvents)
     pages = @($results)

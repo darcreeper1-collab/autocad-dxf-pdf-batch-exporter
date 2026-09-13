@@ -15,11 +15,15 @@ from pypdf import PdfReader
 def find_pdftoppm(explicit: str | None) -> str | None:
     if explicit:
         candidate = Path(explicit)
-        if candidate.exists():
+        if candidate.is_file():
             return str(candidate)
+        raise SystemExit(f"Explicit pdftoppm executable not found: {candidate}")
+    on_path = shutil.which("pdftoppm.exe") or shutil.which("pdftoppm")
+    if on_path:
+        return on_path
     candidates = []
     exe = Path(sys.executable).resolve()
-    for parent in list(exe.parents)[:7]:
+    for parent in list(exe.parents)[:3]:
         for rel in (
             Path("native/poppler/Library/bin/pdftoppm.exe"),
             Path("dependencies/native/poppler/Library/bin/pdftoppm.exe"),
@@ -29,13 +33,9 @@ def find_pdftoppm(explicit: str | None) -> str | None:
             candidate = parent / rel
             if candidate.exists():
                 candidates.append(candidate)
-        candidates.extend(parent.glob("**/pdftoppm.exe"))
     for candidate in candidates:
         if candidate.is_file():
             return str(candidate)
-    on_path = shutil.which("pdftoppm.exe") or shutil.which("pdftoppm")
-    if on_path:
-        return on_path
     return None
 
 
@@ -56,33 +56,23 @@ def parse_sample_pages(value: str, page_count: int) -> list[int]:
 
 def image_stats(path: Path) -> dict:
     try:
-        from PIL import Image
+        from PIL import Image, ImageChops
     except Exception:
         return {"image": str(path), "statsAvailable": False}
     with Image.open(path) as image:
         rgb = image.convert("RGB")
         width, height = rgb.size
-        data = rgb.tobytes()
-    nonwhite = 0
-    color_pixels = 0
-    min_x, min_y = width, height
-    max_x = max_y = -1
-    for offset in range(0, len(data), 3):
-        r = data[offset]
-        g = data[offset + 1]
-        b = data[offset + 2]
-        if min(r, g, b) < 245:
-            nonwhite += 1
-            index = offset // 3
-            x = index % width
-            y = index // width
-            min_x = min(min_x, x)
-            min_y = min(min_y, y)
-            max_x = max(max_x, x)
-            max_y = max(max_y, y)
-            if max(r, g, b) - min(r, g, b) > 10:
-                color_pixels += 1
-    bbox = None if nonwhite == 0 else [min_x, min_y, max_x, max_y]
+        r, g, b = rgb.split()
+        low = ImageChops.darker(ImageChops.darker(r, g), b)
+        high = ImageChops.lighter(ImageChops.lighter(r, g), b)
+        ink = low.point([255 if value < 245 else 0 for value in range(256)])
+        chroma = ImageChops.subtract(high, low).point([255 if value > 10 else 0 for value in range(256)])
+        nonwhite = ink.histogram()[255]
+        color_pixels = ImageChops.darker(ink, chroma).histogram()[255]
+        box = ink.getbbox()
+    bbox = None if box is None else [box[0], box[1], box[2] - 1, box[3] - 1]
+    if bbox is not None:
+        min_x, min_y, max_x, max_y = bbox
     margins = None
     margin_fractions = None
     bbox_fraction = None

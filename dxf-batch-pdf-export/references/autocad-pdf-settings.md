@@ -12,7 +12,9 @@ Use AutoCAD for final plotting when SHX/text handling, colors, lineweights, line
 
 ## Instance behavior
 
-The default workflow creates a dedicated hidden AutoCAD instance and disposes it in `finally`. It waits for AutoCAD idle state and retries only transient busy COM calls. `-ReuseExistingAutoCAD 1` is an explicit exception; the existing user application is not hidden or quit, and only the job's own opened document is closed.
+The default workflow creates a dedicated AutoCAD instance, records its window identity before hiding it, and attempts cleanup in `finally`. It waits for idle state and retries transient busy COM calls. A supervised worker bounds non-returning calls with `-ComCallTimeoutSeconds` (default 300); on timeout only that worker is stopped and the identified owned AutoCAD window is requested visible. AutoCAD is not killed, and forced termination cannot guarantee cleanup. `-ReuseExistingAutoCAD 1` is explicit; that application is never hidden or quit. See troubleshooting for residual instances and activation-time limits.
+
+Device, canonical media, paper units, window plot type, centering, fit scale, rotation, plot-style/color and lineweight controls are required properties. Assignment and readback must succeed, and critical values are checked again before each plot. Device refresh also fails fast. Unsupported optional settings still produce warnings. Inspect `autoCad.cleanupFailed` and COM events before claiming a clean shutdown.
 
 ## Useful variables
 

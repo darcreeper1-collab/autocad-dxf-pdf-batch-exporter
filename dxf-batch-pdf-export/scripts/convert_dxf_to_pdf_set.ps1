@@ -24,7 +24,7 @@ param(
     [string]$DetectionStrategy = "auto",
     [string]$FrameColor = "6",
     [string]$FrameLayer = "",
-    [string]$FrameLayerToken = "图框",
+    [string]$FrameLayerToken = ([string][char]0x56FE + [char]0x6846),
     [double]$ColorClusterGap = 2.0,
     [double]$ClusterGap = 30.0,
     [int]$MinClusterEntities = 20,
@@ -38,6 +38,7 @@ param(
     [string]$AutoCadProgId = "",
     [int]$ReuseExistingAutoCAD = 0,
     [int]$ComTimeoutSeconds = 120,
+    [ValidateRange(1, 86400)][int]$ComCallTimeoutSeconds = 300,
     [int]$ComInitialDelayMilliseconds = 250,
     [int]$ComMaxDelayMilliseconds = 3000,
     [int]$DxfSaveAsFormat = -1,
@@ -97,7 +98,7 @@ $conversionSummary = $null
 if ($route.requiresDxfMirror) {
     $conversionOutput = & $dwgMirrorScript -InputDwg $route.sourceInput -OutputDxf $route.workingDxfCopy `
         -AutoCadProgId $AutoCadProgId -ReuseExistingAutoCAD $ReuseExistingAutoCAD `
-        -ComTimeoutSeconds $ComTimeoutSeconds -ComInitialDelayMilliseconds $ComInitialDelayMilliseconds `
+        -ComTimeoutSeconds $ComTimeoutSeconds -ComCallTimeoutSeconds $ComCallTimeoutSeconds -ComInitialDelayMilliseconds $ComInitialDelayMilliseconds `
         -ComMaxDelayMilliseconds $ComMaxDelayMilliseconds -DxfSaveAsFormat $DxfSaveAsFormat
     # In-process scripts propagate errors under Stop; native exit codes can be stale.
     $conversionSummary = $conversionOutput | ConvertFrom-Json
@@ -153,7 +154,7 @@ if ($MaxPages -gt 0 -and $MaxPages -lt $expectedCount) { $expectedCount = $MaxPa
 
 $plotOutput = & $plotScript -InputDxf $route.plotInput -WindowsJson $framesJson -OutputDir $pagesDir `
     -AutoCadProgId $AutoCadProgId -ReuseExistingAutoCAD $ReuseExistingAutoCAD `
-    -ComTimeoutSeconds $ComTimeoutSeconds -ComInitialDelayMilliseconds $ComInitialDelayMilliseconds `
+    -ComTimeoutSeconds $ComTimeoutSeconds -ComCallTimeoutSeconds $ComCallTimeoutSeconds -ComInitialDelayMilliseconds $ComInitialDelayMilliseconds `
     -ComMaxDelayMilliseconds $ComMaxDelayMilliseconds -DeviceName $DeviceName -MediaName $MediaName `
     -PlotRotation $PlotRotation -MaxPages $MaxPages -SuppressViewerWindows $SuppressViewerWindows `
     -ViewerSuppressSeconds $ViewerSuppressSeconds -IntermediateExtension $IntermediateExtension

@@ -19,11 +19,15 @@
 
 ## Cluster safeguard
 
-A single cluster can cover the full model space even when it contains several drawing sheets. When that one cluster covers multiple standard-sized candidates found on `图框` layers, the detector fails with a readable message instead of silently exporting one oversized page. Use `--strategy layer` to inspect the pages. `--allow-suspicious-cluster` is an explicit override for a manually reviewed exceptional drawing.
+A single fallback cluster can combine several sheets even when no `图框` layer exists. Every single-cluster fallback now stops for confirmation. Use `--frame-layer FRAME,BORDER,TK` (or the real layer) or an explicit frame block to supply independent frame evidence. `--allow-suspicious-cluster` is an override only for a manually reviewed drawing, including a genuine single sheet. Verified block/color/layer single sheets are unaffected.
+
+Classic `POLYLINE` geometry now collects its subsequent `VERTEX` records through `SEQEND`, excluding the non-geometric header point, in both ENTITIES and BLOCKS. This covers straight 2D frame outlines; bulges and non-world-plane geometry remain sample-review cases. Connected components cache bounds, preserving existing grouping semantics without rescanning every member on insertion; worst-case comparisons across many isolated components remain quadratic.
 
 ## Page-order evidence
 
 After frame geometry is selected, the detector searches direct TEXT/MTEXT/ATTRIB/ATTDEF inside each raw frame for `第x张 共x张`. It only changes output order when every frame yields exactly one coherent, complete sequence from `1` through the detected count. `frames.json.pageOrder` records the chosen method, while each successful frame contains `pageNumberEvidence` with the matched text, layer, and coordinate.
+
+Separators also accept comma/Chinese comma, slash/full-width slash, and semicolon with optional spaces. MTEXT paragraph/nonbreaking-space escapes are normalized, and long MTEXT chunks are read before the final text chunk. Conflicting matches within one text entity are rejected, not silently reduced to the first match.
 
 Any missing, duplicate, conflicting, or inconsistent evidence leaves the requested geometric sort intact and adds a warning. This prevents a local annotation from reordering a full PDF set.
 

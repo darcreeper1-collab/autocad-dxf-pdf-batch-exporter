@@ -148,19 +148,22 @@ def frames_from_block_candidate(args, entities, candidate: dict) -> tuple[list[d
 
 def connected_components(records: list[dict], gap: float) -> list[list[dict]]:
     components: list[list[dict]] = []
+    bounds = []
     for record in records:
         attached = []
-        for index, component in enumerate(components):
-            component_bbox = bbox_union([item["bbox"] for item in component])
+        for index, component_bbox in enumerate(bounds):
             if component_bbox is not None and boxes_touch(component_bbox, record["bbox"], gap):
                 attached.append(index)
         if not attached:
             components.append([record])
+            bounds.append(record["bbox"])
             continue
         first_index = attached[0]
         components[first_index].append(record)
+        bounds[first_index] = bbox_union([bounds[first_index], record["bbox"]])
         for index in reversed(attached[1:]):
             components[first_index].extend(components.pop(index))
+            bounds[first_index] = bbox_union([bounds[first_index], bounds.pop(index)])
     return components
 
 
@@ -378,16 +381,18 @@ def choose_frames(args, entities, blocks):
         )
 
     selected_frames = available[selected]
-    if selected == "cluster" and len(selected_frames) == 1 and len(layer_frames) > 1:
-        if covers(tuple(selected_frames[0]["rawWindow"]), raw_bbox_union(layer_frames), args.tolerance):
-            message = (
-                "Cluster detection produced one model-covering window while named frame layers produced multiple standard sheets. "
-                "Use --strategy layer or pass --allow-suspicious-cluster only after manual confirmation."
-            )
-            diagnostics["conflicts"].append({"type": "model-covering-cluster", "clusterFrames": 1, "layerFrames": len(layer_frames)})
-            if not args.allow_suspicious_cluster:
-                raise RuntimeError(message)
-            warnings.append(message)
+    if selected == "cluster" and len(selected_frames) == 1:
+        # A fallback cluster has no independent sheet evidence, regardless of layer names.
+        message = (
+            "Cluster detection produced a single unverified window that may combine multiple sheets. "
+            "Specify --frame-layer FRAME,BORDER,TK (or the actual layer), use verified frames, "
+            "or pass --allow-suspicious-cluster only after manual confirmation. "
+            f"Candidate counts: {counts}."
+        )
+        diagnostics["conflicts"].append({"type": "unverified-single-cluster", "clusterFrames": 1, "layerFrames": len(layer_frames)})
+        if not args.allow_suspicious_cluster:
+            raise RuntimeError(message)
+        warnings.append(message)
 
     if selected == "block":
         warnings.extend(block_warnings)

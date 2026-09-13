@@ -7,7 +7,7 @@ import re
 from dxf_scan_utils import decode_cad_text, entity_layer, first, get_text_value, parse_float
 
 TEXT_TYPES = {"TEXT", "MTEXT", "ATTRIB", "ATTDEF"}
-PAGE_NUMBER_PATTERN = re.compile("\u7b2c\\s*(\\d+)\\s*\u5f20\\s*\u5171\\s*(\\d+)\\s*\u5f20")
+PAGE_NUMBER_PATTERN = re.compile("\u7b2c\\s*(\\d+)\\s*\u5f20[\\s,;/\uFF0C\uFF1B\uFF0F\u3001]*\u5171\\s*(\\d+)\\s*\u5f20")
 
 
 def apply_page_number_sort(frames: list[dict], entities) -> tuple[list[dict], dict, list[str]]:
@@ -15,6 +15,7 @@ def apply_page_number_sort(frames: list[dict], entities) -> tuple[list[dict], di
     warnings: list[str] = []
     evidence_count = 0
     for frame in frames:
+        frame.pop("pageNumberEvidence", None)
         x0, y0, x1, y1 = frame["rawWindow"]
         matches = []
         for entity_type, entity in entities:
@@ -25,7 +26,9 @@ def apply_page_number_sort(frames: list[dict], entities) -> tuple[list[dict], di
             if x is None or y is None or not (x0 <= x <= x1 and y0 <= y <= y1):
                 continue
             text, _ = decode_cad_text(get_text_value(entity))
-            match = PAGE_NUMBER_PATTERN.search(text)
+            text = text.replace("\\P", " ").replace("\\~", " ")
+            found = list(PAGE_NUMBER_PATTERN.finditer(text))
+            match = found[0] if found else None
             if not match:
                 continue
             matches.append(
@@ -37,6 +40,8 @@ def apply_page_number_sort(frames: list[dict], entities) -> tuple[list[dict], di
                     "point": [round(x, 6), round(y, 6)],
                 }
             )
+            for extra in found[1:]:
+                matches.append({**matches[-1], "page": int(extra.group(1)), "total": int(extra.group(2))})
         if matches:
             unique = {(item["page"], item["total"]) for item in matches}
             if len(unique) == 1:
@@ -59,7 +64,7 @@ def apply_page_number_sort(frames: list[dict], entities) -> tuple[list[dict], di
     if valid:
         frames.sort(key=lambda item: item["pageNumberEvidence"]["page"])
         return frames, {"method": "title-block-page-number", "detected": evidence_count, "expectedTotal": expected}, warnings
-    if evidence_count:
+    if frames:
         warnings.append(
             f"Title-block page-number evidence was incomplete or inconsistent ({evidence_count}/{expected} frames); retained geometric ordering."
         )
